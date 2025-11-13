@@ -11,10 +11,11 @@ export function parseWhatsAppFormat(content, fileName) {
   let currentMessage = null;
   
   // Regex to match WhatsApp message format:
-  // "YYYY-MM-DD, HH:MM a.m./p.m. - Sender: Message"
+  // "YYYY-MM-DD, HH:MM a.m./p.m. - Sender: Message" (with space)
+  // "YYYY-MM-DD, HH:MMa.m./p.m. - Sender: Message" (without space)
   // or system messages: "YYYY-MM-DD, HH:MM a.m./p.m. - Message"
-  const messageRegex = /^(\d{4}-\d{2}-\d{2}),\s+(\d{1,2}:\d{2}\s+(?:a\.m\.|p\.m\.))\s+-\s+([^:]+?):\s+(.*)$/;
-  const systemMessageRegex = /^(\d{4}-\d{2}-\d{2}),\s+(\d{1,2}:\d{2}\s+(?:a\.m\.|p\.m\.))\s+-\s+(.*)$/;
+  const messageRegex = /^(\d{4}-\d{2}-\d{2}),\s+(\d{1,2}:\d{2}\s*(?:a\.m\.|p\.m\.))\s+-\s+([^:]+?):\s+(.*)$/;
+  const systemMessageRegex = /^(\d{4}-\d{2}-\d{2}),\s+(\d{1,2}:\d{2}\s*(?:a\.m\.|p\.m\.))\s+-\s+(.*)$/;
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -104,14 +105,15 @@ export function parseWhatsAppFormat(content, fileName) {
 
 /**
  * Parse WhatsApp date/time format
- * Format: "YYYY-MM-DD" and "HH:MM a.m./p.m."
+ * Format: "YYYY-MM-DD" and "HH:MM a.m./p.m." or "HH:MMa.m./p.m."
  */
 function parseWhatsAppDateTime(dateStr, timeStr) {
   // Parse date: "2021-06-21"
   const [year, month, day] = dateStr.split('-').map(Number);
   
-  // Parse time: "4:23 a.m." or "11:45 p.m."
-  const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s+(a\.m\.|p\.m\.)/);
+  // Parse time: "4:23 a.m." or "4:23a.m." or "11:45 p.m." or "11:45p.m."
+  // Handle both with and without space before period indicator
+  const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s*(a\.m\.|p\.m\.)/);
   if (!timeMatch) {
     throw new Error(`Invalid time format: ${timeStr}`);
   }

@@ -26,8 +26,8 @@ export function detectFormat(file, content) {
     }
     
     // Check if it's WhatsApp export
-    // WhatsApp format: "YYYY-MM-DD, HH:MM a.m./p.m. - ..."
-    const whatsappPattern = /^\d{4}-\d{2}-\d{2},\s+\d{1,2}:\d{2}\s+(?:a\.m\.|p\.m\.)\s+-\s+/;
+    // WhatsApp format: "YYYY-MM-DD, HH:MM a.m./p.m. - ..." or "YYYY-MM-DD, HH:MMa.m./p.m. - ..."
+    const whatsappPattern = /^\d{4}-\d{2}-\d{2},\s+\d{1,2}:\d{2}\s*(?:a\.m\.|p\.m\.)\s+-\s+/;
     if (whatsappPattern.test(firstLine)) {
       return 'whatsapp';
     }
@@ -50,7 +50,7 @@ export function detectFormat(file, content) {
   }
   
   // WhatsApp format
-  const whatsappPattern = /^\d{4}-\d{2}-\d{2},\s+\d{1,2}:\d{2}\s+(?:a\.m\.|p\.m\.)\s+-\s+/;
+  const whatsappPattern = /^\d{4}-\d{2}-\d{2},\s+\d{1,2}:\d{2}\s*(?:a\.m\.|p\.m\.)\s+-\s+/;
   if (whatsappPattern.test(trimmedContent)) {
     return 'whatsapp';
   }
