@@ -311,7 +311,7 @@ Remember: Respond ONLY with the JSON object, no explanatory text before or after
           </div>
           
           <p className="text-gray-600 mb-6">
-            Upload your messenger exports to analyze conversation patterns and relationship dynamics over time. Supports Facebook, Instagram (JSON), and Line Messenger (TXT).
+            Upload your messenger exports to analyze conversation patterns and relationship dynamics over time. Supports Facebook, Instagram (JSON), Line Messenger (TXT), and WhatsApp (TXT).
           </p>
           
           <div className="border-2 border-dashed border-purple-300 rounded-lg p-8 text-center hover:border-purple-500 transition-colors">

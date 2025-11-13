@@ -5,6 +5,7 @@
 
 import { parseLineFormat } from './lineAdapter';
 import { parseJSONFormat } from './jsonAdapter';
+import { parseWhatsAppFormat } from './whatsappAdapter';
 
 /**
  * Detect the format of a conversation file
@@ -23,7 +24,15 @@ export function detectFormat(file, content) {
     if (firstLine.includes('Chat history with') || firstLine.includes('﻿Chat history with')) {
       return 'line';
     }
-    // Could add more TXT format detection here (WhatsApp, etc.)
+    
+    // Check if it's WhatsApp export
+    // WhatsApp format: "YYYY-MM-DD, HH:MM a.m./p.m. - ..."
+    const whatsappPattern = /^\d{4}-\d{2}-\d{2},\s+\d{1,2}:\d{2}\s+(?:a\.m\.|p\.m\.)\s+-\s+/;
+    if (whatsappPattern.test(firstLine)) {
+      return 'whatsapp';
+    }
+    
+    // Could add more TXT format detection here
     return 'unknown-txt';
   }
   
@@ -38,6 +47,12 @@ export function detectFormat(file, content) {
   // Line format
   if (trimmedContent.includes('Chat history with')) {
     return 'line';
+  }
+  
+  // WhatsApp format
+  const whatsappPattern = /^\d{4}-\d{2}-\d{2},\s+\d{1,2}:\d{2}\s+(?:a\.m\.|p\.m\.)\s+-\s+/;
+  if (whatsappPattern.test(trimmedContent)) {
+    return 'whatsapp';
   }
   
   return 'unknown';
@@ -61,11 +76,14 @@ export async function parseConversation(file) {
       case 'line':
         return parseLineFormat(content, file.name);
       
+      case 'whatsapp':
+        return parseWhatsAppFormat(content, file.name);
+      
       case 'unknown-txt':
-        throw new Error(`Text file format not recognized. Currently supported: Line Messenger`);
+        throw new Error(`Text file format not recognized. Currently supported: Line Messenger, WhatsApp`);
       
       case 'unknown':
-        throw new Error(`File format not recognized. Supported: JSON (Facebook/Instagram), TXT (Line Messenger)`);
+        throw new Error(`File format not recognized. Supported: JSON (Facebook/Instagram), TXT (Line Messenger, WhatsApp)`);
       
       default:
         throw new Error(`Unsupported format: ${format}`);
