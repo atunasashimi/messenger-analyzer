@@ -3,6 +3,8 @@
 /.pnp
 .pnp.js
 
+PROJECT_HANDOFF.md
+
 # testing
 /coverage
 

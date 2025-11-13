@@ -9,41 +9,106 @@ const MessengerAnalysis = () => {
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [expandedMonths, setExpandedMonths] = useState({});
+  const [parseErrors, setParseErrors] = useState([]);
+
+  // Helper function to decode Facebook's weird encoding
+  const decodeFacebookText = (text) => {
+    if (!text) return text;
+    try {
+      // Facebook exports use Latin-1 encoding for UTF-8 characters
+      return decodeURIComponent(escape(text));
+    } catch {
+      return text;
+    }
+  };
 
   const handleFileUpload = async (e) => {
     const uploadedFiles = Array.from(e.target.files);
     setFiles(uploadedFiles);
+    setParseErrors([]);
     
     // Parse all JSON files
     const parsedConversations = [];
+    const errors = [];
     
     for (const file of uploadedFiles) {
       try {
         const text = await file.text();
         const data = JSON.parse(text);
         
+        console.log('Parsing file:', file.name);
+        console.log('Data structure:', {
+          hasMessages: !!data.messages,
+          messageCount: data.messages?.length,
+          hasParticipants: !!data.participants,
+          participantCount: data.participants?.length,
+          title: data.title,
+          sampleMessage: data.messages?.[0]
+        });
+        
         // Facebook Messenger export format parsing
-        if (data.messages && data.participants) {
-          const participants = data.participants.map(p => p.name);
-          const messages = data.messages.map(msg => ({
-            sender: msg.sender_name,
-            content: msg.content || '[Media/Reaction]',
-            timestamp: msg.timestamp_ms,
-            date: new Date(msg.timestamp_ms)
-          })).sort((a, b) => a.timestamp - b.timestamp);
+        if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
+          const participants = data.participants?.map(p => decodeFacebookText(p.name)) || [];
           
-          parsedConversations.push({
-            participants,
-            messages,
-            title: data.title || participants.join(', ')
-          });
+          const messages = data.messages
+            .filter(msg => {
+              // Filter out messages without content or with only reactions/media
+              return msg.content || msg.photos || msg.videos || msg.audio_files || msg.files;
+            })
+            .map(msg => {
+              let content = '';
+              
+              if (msg.content) {
+                content = decodeFacebookText(msg.content);
+              } else if (msg.photos) {
+                content = '[Photo]';
+              } else if (msg.videos) {
+                content = '[Video]';
+              } else if (msg.audio_files) {
+                content = '[Audio]';
+              } else if (msg.files) {
+                content = '[File]';
+              } else if (msg.share) {
+                content = '[Shared link]';
+              } else {
+                content = '[Media]';
+              }
+              
+              return {
+                sender: decodeFacebookText(msg.sender_name),
+                content: content,
+                timestamp: msg.timestamp_ms,
+                date: new Date(msg.timestamp_ms)
+              };
+            })
+            .filter(msg => msg.timestamp && msg.sender && msg.content)
+            .sort((a, b) => a.timestamp - b.timestamp);
+          
+          if (messages.length > 0 && participants.length > 0) {
+            parsedConversations.push({
+              participants,
+              messages,
+              title: decodeFacebookText(data.title) || participants.join(', ')
+            });
+            console.log(`Successfully parsed: ${messages.length} messages with ${participants.length} participants`);
+          } else {
+            errors.push(`${file.name}: No valid messages or participants found`);
+          }
+        } else {
+          errors.push(`${file.name}: Invalid format - missing messages array`);
         }
       } catch (error) {
         console.error(`Error parsing ${file.name}:`, error);
+        errors.push(`${file.name}: ${error.message}`);
       }
     }
     
+    setParseErrors(errors);
     setConversations(parsedConversations);
+    
+    if (parsedConversations.length === 0 && errors.length > 0) {
+      alert('Failed to parse any conversations. Check the console for details.');
+    }
   };
 
   // Extract unique people from conversations
@@ -86,6 +151,10 @@ const MessengerAnalysis = () => {
       
       allMessages.sort((a, b) => a.timestamp - b.timestamp);
       
+      if (allMessages.length === 0) {
+        throw new Error('No messages found for this person');
+      }
+      
       // Group messages by month for timeline
       const messagesByMonth = {};
       allMessages.forEach(msg => {
@@ -98,66 +167,90 @@ const MessengerAnalysis = () => {
       
       // Create sample of messages for analysis (to avoid token limits)
       const sampleMessages = [];
-      Object.keys(messagesByMonth).sort().forEach(month => {
+      const monthKeys = Object.keys(messagesByMonth).sort();
+      
+      // If there are many months, sample more strategically
+      const monthsToSample = monthKeys.length > 12 ? 
+        [...monthKeys.slice(0, 3), ...monthKeys.slice(Math.floor(monthKeys.length / 2) - 1, Math.floor(monthKeys.length / 2) + 2), ...monthKeys.slice(-3)] :
+        monthKeys;
+      
+      monthsToSample.forEach(month => {
         const monthMessages = messagesByMonth[month];
-        // Take first 5, middle 5, and last 5 messages from each month
-        const first = monthMessages.slice(0, 5);
-        const middle = monthMessages.slice(Math.floor(monthMessages.length / 2) - 2, Math.floor(monthMessages.length / 2) + 3);
-        const last = monthMessages.slice(-5);
-        sampleMessages.push({ month, messages: [...first, ...middle, ...last] });
+        // Take first 10, middle 10, and last 10 messages from each month
+        const first = monthMessages.slice(0, 10);
+        const middle = monthMessages.slice(Math.floor(monthMessages.length / 2) - 5, Math.floor(monthMessages.length / 2) + 5);
+        const last = monthMessages.slice(-10);
+        
+        // Combine and deduplicate
+        const combined = [...first, ...middle, ...last];
+        const unique = Array.from(new Set(combined.map(m => m.timestamp))).map(ts => 
+          combined.find(m => m.timestamp === ts)
+        );
+        
+        sampleMessages.push({ month, messages: unique });
       });
       
       // Prepare analysis prompt
       const conversationSummary = sampleMessages.map(({ month, messages }) => {
-        return `\n=== ${month} ===\n` + messages.map(m => 
-          `[${m.date.toLocaleString()}] ${m.sender}: ${m.content}`
+        return `\n=== ${month} (${messagesByMonth[month].length} total messages) ===\n` + messages.map(m => 
+          `[${m.date.toLocaleDateString()} ${m.date.toLocaleTimeString()}] ${m.sender}: ${m.content}`
         ).join('\n');
       }).join('\n');
       
-      const analysisPrompt = `You are a conversational psychoanalyst. Analyze this conversation history between multiple people, focusing on relationship dynamics, emotional patterns, and how the relationship has evolved over time.
+      const analysisPrompt = `You are a conversational psychoanalyst. Analyze this conversation history between people, focusing on relationship dynamics, emotional patterns, and how the relationship has evolved over time.
 
-Conversation History (sampled from each month):
+IMPORTANT CONTEXT:
+- Total messages in conversation: ${allMessages.length}
+- Time span: ${allMessages[0].date.toLocaleDateString()} to ${allMessages[allMessages.length - 1].date.toLocaleDateString()}
+- Number of months: ${monthKeys.length}
+- This is a SAMPLE of the conversation (showing key messages from each month)
+
+Conversation History Sample:
 ${conversationSummary}
 
-Please provide a comprehensive psychoanalytic assessment in the following JSON format. DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON:
+Please provide a comprehensive psychoanalytic assessment in the following JSON format. YOUR ENTIRE RESPONSE MUST BE VALID JSON WITH NO OTHER TEXT:
 
 {
-  "overallAssessment": "A comprehensive summary of the relationship dynamics and evolution",
+  "overallAssessment": "A comprehensive 3-4 sentence summary of the relationship dynamics and evolution based on the actual conversation content",
   "relationshipPhases": [
     {
-      "period": "Time period description",
-      "description": "What characterized this phase",
-      "emotionalTone": "Dominant emotional tone",
-      "keyThemes": ["theme1", "theme2"]
+      "period": "Time period description (e.g., 'Early 2023', 'Mid 2024')",
+      "description": "What characterized this phase based on actual messages",
+      "emotionalTone": "Dominant emotional tone observed",
+      "keyThemes": ["theme1", "theme2", "theme3"]
     }
   ],
   "communicationPatterns": {
-    "initiationDynamics": "Who initiates conversations and what does this reveal",
-    "responsePatterns": "How each person responds to the other",
-    "conversationalBalance": "Assessment of give-and-take in the relationship"
+    "initiationDynamics": "Who initiates conversations and what this reveals based on the data",
+    "responsePatterns": "How each person responds to the other based on actual exchanges",
+    "conversationalBalance": "Assessment of give-and-take based on message patterns"
   },
   "emotionalDynamics": {
-    "attachmentStyle": "Observed attachment patterns",
-    "conflictResolution": "How conflicts or tensions are handled",
-    "intimacyLevel": "Assessment of emotional intimacy over time"
+    "attachmentStyle": "Observed attachment patterns from the messages",
+    "conflictResolution": "How conflicts or tensions are handled (if observed)",
+    "intimacyLevel": "Assessment of emotional intimacy over time based on content"
   },
   "evolutionTimeline": [
     {
       "phase": "Phase name",
-      "timeframe": "Approximate dates",
-      "characteristics": "Key characteristics",
+      "timeframe": "Approximate dates from the data",
+      "characteristics": "Key characteristics observed in messages",
       "sentiment": "positive/neutral/negative/mixed"
     }
   ],
   "insights": [
-    "Key psychological insight 1",
-    "Key psychological insight 2",
-    "Key psychological insight 3"
+    "Specific psychological insight based on message patterns",
+    "Another insight from actual conversation dynamics",
+    "Third insight from observed behaviors"
   ],
   "recommendations": [
-    "Recommendation for relationship health or self-awareness"
+    "Actionable recommendation for relationship health based on analysis"
   ]
-}`;
+}
+
+CRITICAL: Base your analysis ONLY on the actual message content provided. Do not make assumptions. If data is limited, acknowledge that in your assessment.`;
+
+      console.log('Sending analysis request with', allMessages.length, 'total messages');
 
       // Call backend API instead of Claude directly
       const response = await fetch('/api/analyze', {
@@ -177,6 +270,8 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
 
       const data = await response.json();
       let responseText = data.content[0].text;
+      
+      console.log('Raw API response:', responseText);
       
       // Strip markdown code blocks if present
       responseText = responseText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -262,6 +357,17 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
               </span>
             </label>
           </div>
+          
+          {parseErrors.length > 0 && (
+            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <h3 className="font-semibold text-yellow-800 mb-2">Parsing Issues:</h3>
+              <ul className="text-sm text-yellow-700 space-y-1">
+                {parseErrors.map((error, idx) => (
+                  <li key={idx}>• {error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {people.length > 0 && (
@@ -269,7 +375,7 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
             <div className="flex items-center gap-3 mb-6">
               <User className="w-6 h-6 text-blue-600" />
               <h2 className="text-2xl font-bold text-gray-800">
-                People in Your Conversations
+                People in Your Conversations ({people.length})
               </h2>
             </div>
             
@@ -287,7 +393,7 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
                     <div className="flex-1">
                       <h3 className="font-semibold text-gray-800">{person.name}</h3>
                       <p className="text-sm text-gray-600">
-                        {person.messageCount} messages
+                        {person.messageCount.toLocaleString()} messages
                       </p>
                     </div>
                     <MessageSquare className="w-5 h-5 text-purple-400" />
@@ -329,7 +435,7 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
                       Analysis: {analysis.person}
                     </h2>
                   </div>
-                  <p className="text-gray-700 leading-relaxed">{analysis.overallAssessment}</p>
+                  <p className="text-gray-700 leading-relaxed text-lg">{analysis.overallAssessment}</p>
                 </div>
 
                 {/* Statistics */}
@@ -342,11 +448,11 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                     <div className="bg-blue-50 rounded-lg p-4">
                       <p className="text-sm text-gray-600 mb-1">Total Messages</p>
-                      <p className="text-2xl font-bold text-blue-600">{analysis.stats.totalMessages}</p>
+                      <p className="text-2xl font-bold text-blue-600">{analysis.stats.totalMessages.toLocaleString()}</p>
                     </div>
                     <div className="bg-purple-50 rounded-lg p-4">
                       <p className="text-sm text-gray-600 mb-1">Their Messages</p>
-                      <p className="text-2xl font-bold text-purple-600">{analysis.stats.userMessageCount}</p>
+                      <p className="text-2xl font-bold text-purple-600">{analysis.stats.userMessageCount.toLocaleString()}</p>
                     </div>
                     <div className="bg-green-50 rounded-lg p-4">
                       <p className="text-sm text-gray-600 mb-1">Avg Per Day</p>
@@ -545,7 +651,7 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
                           {isExpanded && (
                             <div className="p-4 bg-white max-h-96 overflow-y-auto">
                               <div className="space-y-2">
-                                {messages.slice(0, 50).map((msg, idx) => (
+                                {messages.slice(0, 100).map((msg, idx) => (
                                   <div key={idx} className={`p-3 rounded-lg ${msg.sender === analysis.person ? 'bg-blue-50 ml-8' : 'bg-gray-50 mr-8'}`}>
                                     <div className="flex items-center gap-2 mb-1">
                                       <span className="font-semibold text-sm text-gray-800">{msg.sender}</span>
@@ -554,9 +660,9 @@ Please provide a comprehensive psychoanalytic assessment in the following JSON f
                                     <p className="text-gray-700 text-sm">{msg.content}</p>
                                   </div>
                                 ))}
-                                {messages.length > 50 && (
+                                {messages.length > 100 && (
                                   <p className="text-center text-sm text-gray-500 pt-2">
-                                    Showing first 50 of {messages.length} messages
+                                    Showing first 100 of {messages.length} messages
                                   </p>
                                 )}
                               </div>
