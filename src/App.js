@@ -86,22 +86,28 @@ const MessengerAnalysis = () => {
       const messageCount = conv.messages.length;
       const participants = conv.participants;
       
+      // Normalize participants to strings
+      const participantNames = participants.map(p => 
+        typeof p === 'string' ? p : p.name
+      );
+      
       // Calculate message distribution between participants
       const messageCounts = {};
-      participants.forEach(p => {
-        messageCounts[p] = conv.messages.filter(m => m.sender === p).length;
+      participantNames.forEach(name => {
+        messageCounts[name] = conv.messages.filter(m => m.sender === name).length;
       });
       
       return {
         title: conv.title,
-        participants: participants,
+        participants: participantNames,
         messageCount: messageCount,
         messageCounts: messageCounts,
         messages: conv.messages,
         dateRange: {
           start: conv.messages[0]?.date,
           end: conv.messages[conv.messages.length - 1]?.date
-        }
+        },
+        isMerged: conv.isMerged || false
       };
     }).sort((a, b) => b.messageCount - a.messageCount);
   }, [conversations]);
@@ -370,6 +376,11 @@ Remember: Respond ONLY with the JSON object, no explanatory text before or after
                       <h3 className="font-semibold text-gray-800 group-hover:text-purple-600">
                         {conv.title}
                       </h3>
+                      {conv.isMerged && (
+                        <span className="px-2 py-1 bg-purple-500 text-white text-xs rounded-full font-medium">
+                          Merged
+                        </span>
+                      )}
                     </div>
                     <span className="text-sm text-gray-500">{conv.messageCount} msgs</span>
                   </div>
